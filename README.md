@@ -26,7 +26,8 @@ bancaires en streaming, à partir du dataset [PaySim](https://www.kaggle.com/dat
 |---|---|---|---|
 | Infrastructure | Docker Compose : Kafka (KRaft), Kafka UI, PostgreSQL 16, pgAdmin | `docker-compose.yml`, `docker/` | fait |
 | Ingestion | Python 3.12, confluent-kafka | `ingestion/` | fait |
-| Traitement | PySpark 3.5 Structured Streaming, psycopg2 | `processing/` | fait |
+| Traitement | PySpark 3.5 Structured Streaming, psycopg2 | `processing/spark_jobs/` | fait |
+| Machine learning | Spark MLlib (GBTClassifier), registre de modèles versionné | `processing/spark_jobs/ml/` | fait |
 | API métier | Java 21, Spring Boot 3.5, JPA, springdoc, ArchUnit | `api-fraud/` | fait |
 
 > Kafka tourne en mode KRaft (sans Zookeeper), supporté depuis Kafka 3.3 et seul mode possible en 4.x.
@@ -168,8 +169,10 @@ Tests : `cd ingestion && pip install -r requirements-dev.txt && python -m pytest
 | `FLAGGED_BY_SOURCE` | `isFlaggedFraud` du système source | HIGH | 70 |
 | `VELOCITY_COUNT` | ≥ 5 transactions du même compte en 5 min | HIGH | 65 |
 | `VELOCITY_AMOUNT` | ≥ 2 transactions et ≥ 500 000 cumulés par le même compte en 5 min | HIGH | 70 |
+| `ML_HIGH_RISK` | probabilité du modèle MLlib ≥ seuil appris (cf. section ML) | HIGH | 75 |
 
-Score de risque d'une transaction = max des scores déclenchés + 10 par règle supplémentaire, borné à 100.
+Score de risque d'une transaction = max des scores déclenchés + 10 par règle supplémentaire, borné à 100 ;
+lorsque `ML_HIGH_RISK` se déclenche, le score ML (probabilité × 100) est pris en compte dans ce maximum.
 Les seuils sont paramétrables via les variables `RULE_*` du `.env`.
 
 Tests unitaires des règles (Spark local dans l'image) :
@@ -178,6 +181,53 @@ Tests unitaires des règles (Spark local dans l'image) :
 docker compose --profile app build spark
 docker run --rm --entrypoint python3 dtectiondefraude-spark -m pytest /app/tests -q
 ```
+
+## Machine learning : du batch au streaming
+
+Les règles seules ont une précision très faible (environ 1 % sur l'échantillon synthétique : `ACCOUNT_DRAIN`
+se déclenche sur toute opération qui vide un compte, fraude ou non). Un modèle supervisé entraîné sur le
+label PaySim complète les règles.
+
+```
+ CSV PaySim ──► normalisation ──► features ──► GBTClassifier pondéré ──► évaluation ──► registre
+                                     ▲                                                  models/fraud_gbt/
+                                     │ même code (spark_jobs/ml/features.py)              ├── latest
+ Kafka ──► job streaming ────────────┘──► PipelineModel.transform ──► ml_score, ML_HIGH_RISK  ├── v2026.../model/
+                                                                                            └── v2026.../metadata.json
+```
+
+- **Features** (`ml/features.py`), calculables sur une transaction isolée donc applicables au flux :
+  montant et log-montant, soldes, incohérences de solde émetteur / destinataire (`error_balance_*`),
+  part du solde déplacée, compte vidé, destinataire marchand, solde destinataire inchangé, flag source,
+  heure, type encodé one-hot. Une seule définition partagée par l'entraînement et le streaming.
+- **Modèle** : `GBTClassifier` (gradient boosting, 60 arbres, profondeur 5) avec pondération des classes
+  pour le déséquilibre (≈ 0,1 % de fraudes). Split 80 / 20, métriques AUC-ROC, AUC-PR et courbe
+  précision / rappel par seuil ; le seuil retenu maximise le F1 (milieu du plateau en cas d'égalité).
+  Les règles sont évaluées sur le même jeu de test pour servir de référence.
+- **Registre** (`ml/registry.py`) : chaque entraînement publie `models/fraud_gbt/<version>/` (modèle +
+  `metadata.json` : métriques, seuil, importance des features, horodatage) et met à jour `latest`.
+  Le job streaming charge `latest` au démarrage (ou `ML_MODEL_VERSION` pour épingler une version), trace
+  la version utilisée dans `transactions.model_version` et dans chaque alerte `ML_HIGH_RISK`.
+  Sans modèle publié, le job fonctionne avec les règles seules.
+
+```bash
+scripts/train_model.sh                          # entraîne sur data/raw/paysim.csv puis recrée le job Spark
+scripts/train_model.sh --sample 0.2 --max-iter 40   # vrai PaySim (6,3 M lignes) : échantillonner
+```
+
+Résultats sur l'échantillon synthétique (100 000 lignes, 121 fraudes, jeu de test 20 %) :
+
+| | Précision | Rappel | F1 |
+|---|---|---|---|
+| Règles seules | 0,012 | 1,00 | 0,024 |
+| Modèle GBT (seuil 0,50) | 1,00 | 1,00 | 1,00 |
+
+> Le générateur synthétique produit un pattern de fraude trivialement séparable (le modèle est parfait,
+> AUC-PR = 1,0). Sur le vrai dataset PaySim, attendre un AUC-PR de l'ordre de 0,8 à 0,9 : c'est là que la
+> comparaison règles / modèle devient réellement informative.
+
+Tests (`tests/test_ml.py`) : features, entraînement sur jeu réduit, registre, scoring, intégration
+avec les règles et schéma de sortie avec et sans modèle.
 
 ## API métier : Spring Boot, architecture hexagonale
 
@@ -256,7 +306,8 @@ Le workflow GitHub Actions (`.github/workflows/ci.yml`) exécute à chaque push 
 
 ## Modèle de données PostgreSQL (schéma `fraud`)
 
-- `transactions` : transactions analysées par Spark (colonnes PaySim + `risk_score`, `is_suspicious`).
+- `transactions` : transactions analysées par Spark (colonnes PaySim + `risk_score`, `is_suspicious`,
+  `ml_score`, `model_version`).
 - `fraud_alerts` : alertes générées (règle, sévérité, score, statut), unique par (transaction, règle).
 - `alert_status_history` : piste d'audit des changements de statut (alimentée par l'API).
 - `v_alerts_detailed` : vue jointe alertes + transactions.
@@ -277,7 +328,7 @@ docker compose --profile app --profile tools down -v
 
 ## Pistes d'évolution
 
-- Modèle ML (Spark MLlib) entraîné sur le label PaySim, servi en complément des règles.
+- Réentraînement planifié et comparaison champion / challenger entre versions du registre.
 - Sécurisation de l'API (Spring Security, JWT) et rôles analyste / superviseur.
 - Tests d'intégration Testcontainers Kafka + PostgreSQL pour le job Spark lui-même.
 - Observabilité : métriques Spark et API dans Prometheus / Grafana.

@@ -55,7 +55,8 @@ class AlertControllerTest {
                 new BigDecimal("60.00"), status, T, T, null, null);
         Transaction tx = new Transaction(txId, 12, T, T, TransactionType.TRANSFER, new BigDecimal("250000.00"),
                 "C1", new BigDecimal("300000.00"), new BigDecimal("50000.00"), "C2",
-                BigDecimal.ZERO, BigDecimal.ZERO, true, false, new BigDecimal("60.00"), true);
+                BigDecimal.ZERO, BigDecimal.ZERO, true, false, new BigDecimal("60.00"), true,
+                new BigDecimal("97.50"), "v20260301_100000");
         return new AlertDetail(alert, tx);
     }
 
@@ -75,7 +76,9 @@ class AlertControllerTest {
                 .andExpect(jsonPath("$.totalPages").value(1))
                 .andExpect(jsonPath("$.content[0].alert.ruleName").value("HIGH_AMOUNT"))
                 .andExpect(jsonPath("$.content[0].alert.allowedTransitions").isArray())
-                .andExpect(jsonPath("$.content[0].transaction.amount").value(250000.00));
+                .andExpect(jsonPath("$.content[0].transaction.amount").value(250000.00))
+                .andExpect(jsonPath("$.content[0].transaction.mlScore").value(97.50))
+                .andExpect(jsonPath("$.content[0].transaction.modelVersion").value("v20260301_100000"));
 
         ArgumentCaptor<AlertFilter> filter = ArgumentCaptor.forClass(AlertFilter.class);
         ArgumentCaptor<PageQuery> page = ArgumentCaptor.forClass(PageQuery.class);

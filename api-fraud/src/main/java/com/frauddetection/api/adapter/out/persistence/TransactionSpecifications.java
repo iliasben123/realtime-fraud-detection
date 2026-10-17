@@ -1,6 +1,7 @@
 package com.frauddetection.api.adapter.out.persistence;
 
 import com.frauddetection.api.adapter.out.persistence.entity.TransactionEntity;
+import com.frauddetection.api.domain.model.PageQuery;
 import com.frauddetection.api.domain.model.TransactionFilter;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
@@ -13,8 +14,9 @@ final class TransactionSpecifications {
     private TransactionSpecifications() {
     }
 
-    static Specification<TransactionEntity> from(TransactionFilter f) {
+    static Specification<TransactionEntity> from(TransactionFilter f, PageQuery page) {
         return (root, query, cb) -> {
+            PersistenceMapper.applyOrder(query, cb, root, page);
             List<Predicate> p = new ArrayList<>();
             if (f.suspicious() != null) {
                 p.add(cb.equal(root.get("suspicious"), f.suspicious()));

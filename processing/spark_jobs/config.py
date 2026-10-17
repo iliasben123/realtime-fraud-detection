@@ -37,6 +37,9 @@ class JobConfig:
     velocity_watermark: str
     velocity_max_tx: int
     velocity_max_amount: float
+    # Machine learning (registre de modèles ; "" ou répertoire sans `latest` = scoring ML désactivé)
+    ml_model_dir: str = ""
+    ml_model_version: str | None = None     # None = version pointée par `latest`
 
     @property
     def pg_dsn(self) -> str:
@@ -65,4 +68,6 @@ class JobConfig:
             velocity_watermark=os.getenv("RULE_VELOCITY_WATERMARK", "2 minutes"),
             velocity_max_tx=int(os.getenv("RULE_VELOCITY_MAX_TX", "5")),
             velocity_max_amount=float(os.getenv("RULE_VELOCITY_MAX_AMOUNT", "500000")),
+            ml_model_dir=os.getenv("ML_MODEL_DIR", str(PROJECT_ROOT / "models/fraud_gbt")),
+            ml_model_version=os.getenv("ML_MODEL_VERSION") or None,
         )

@@ -25,8 +25,10 @@ from pyspark.sql import functions as F
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from spark_jobs.config import JobConfig                                      # noqa: E402
+from spark_jobs.ml import registry                                           # noqa: E402
+from spark_jobs.ml.scoring import apply_ml_scoring, combine_risk_score, without_ml_scoring  # noqa: E402
 from spark_jobs.rules import (aggregate_velocity, apply_stateless_rules,     # noqa: E402
-                              build_stateless_rules, explode_alerts, velocity_alerts)
+                              build_ml_rule, build_stateless_rules, explode_alerts, velocity_alerts)
 from spark_jobs.schema import TRANSACTION_SCHEMA                             # noqa: E402
 from spark_jobs.sinks import publish_alerts, write_alerts, write_transactions  # noqa: E402
 
@@ -38,7 +40,7 @@ logging.basicConfig(
 log = logging.getLogger("fraud-job")
 
 ALERT_PAYLOAD = ["transaction_id", "rule_name", "description", "severity", "risk_score",
-                 "event_time", "type", "amount", "name_orig", "name_dest", "is_fraud"]
+                 "event_time", "type", "amount", "name_orig", "name_dest", "is_fraud", "ml_score", "model_version"]
 VELOCITY_PAYLOAD = ["transaction_id", "rule_name", "description", "severity", "risk_score",
                     "name_orig", "window_start", "window_end", "tx_count", "total_amount"]
 
@@ -86,10 +88,42 @@ def parse_transactions(raw: DataFrame) -> DataFrame:
 
 
 # ----------------------------------------------------------------------------
+# Scoring : règles métier + modèle MLlib (si un modèle est publié dans le registre)
+# ----------------------------------------------------------------------------
+def load_model(cfg: JobConfig):
+    """Retourne (PipelineModel, ModelInfo) ou (None, None) si aucun modèle n'est disponible."""
+    if not cfg.ml_model_dir:
+        return None, None
+    info = registry.resolve(cfg.ml_model_dir, cfg.ml_model_version)
+    if info is None:
+        log.warning("Aucun modèle ML dans %s : scoring par règles uniquement "
+                    "(entraîner avec spark_jobs/ml/train_model.py)", cfg.ml_model_dir)
+        return None, None
+    model = registry.load(info)
+    m = info.metadata.get("metrics", {})
+    log.info("Modèle ML %s chargé (seuil=%.2f, AUC-PR=%s, précision=%s, rappel=%s)",
+             info.version, info.threshold, m.get("auc_pr"),
+             m.get("at_threshold", {}).get("precision"), m.get("at_threshold", {}).get("recall"))
+    return model, info
+
+
+def build_rules(cfg: JobConfig, info) -> list:
+    rules = build_stateless_rules(cfg)
+    if info is not None:
+        rules.append(build_ml_rule(info.threshold, info.version))
+    return rules
+
+
+def score_transactions(transactions: DataFrame, cfg: JobConfig, model, info) -> DataFrame:
+    scored = apply_ml_scoring(transactions, model, info) if model is not None else without_ml_scoring(transactions)
+    scored = apply_stateless_rules(scored, build_rules(cfg, info))
+    return combine_risk_score(scored)
+
+
+# ----------------------------------------------------------------------------
 # Micro-batches
 # ----------------------------------------------------------------------------
-def make_transactions_batch_handler(cfg: JobConfig):
-    rules = build_stateless_rules(cfg)
+def make_transactions_batch_handler(cfg: JobConfig, rules: list):
 
     def handle(batch_df: DataFrame, batch_id: int) -> None:
         if batch_df.isEmpty():
@@ -148,15 +182,15 @@ def main() -> None:
     spark = build_spark(cfg)
     spark.sparkContext.setLogLevel("WARN")
 
+    model, info = load_model(cfg)
     transactions = read_transactions(spark, cfg)
-    rules = build_stateless_rules(cfg)
-    scored = apply_stateless_rules(transactions, rules)
+    scored = score_transactions(transactions, cfg, model, info)
 
-    # Requête 1 : scoring par transaction + persistance
+    # Requête 1 : scoring par transaction (règles + ML) + persistance
     q_transactions = (
         scored.writeStream
         .queryName("transactions-scoring")
-        .foreachBatch(make_transactions_batch_handler(cfg))
+        .foreachBatch(make_transactions_batch_handler(cfg, build_rules(cfg, info)))
         .option("checkpointLocation", f"{cfg.checkpoint_dir}/transactions")
         .trigger(processingTime=cfg.trigger_interval)
         .start()

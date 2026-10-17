@@ -24,6 +24,7 @@ TRANSACTION_COLUMNS = [
     "name_orig", "old_balance_orig", "new_balance_orig",
     "name_dest", "old_balance_dest", "new_balance_dest",
     "is_fraud", "is_flagged_fraud", "risk_score", "is_suspicious",
+    "ml_score", "model_version",
 ]
 
 # Colonnes insérées dans fraud.fraud_alerts

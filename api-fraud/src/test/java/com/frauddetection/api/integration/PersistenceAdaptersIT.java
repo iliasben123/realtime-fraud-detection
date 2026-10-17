@@ -126,6 +126,23 @@ class PersistenceAdaptersIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void sort_by_optional_column_puts_nulls_last() {
+        UUID scored = insertTransaction("TRANSFER", BIG, "C_ML", "C_X", true, true, new BigDecimal("98"), T0);
+        jdbc.update("UPDATE fraud.transactions SET ml_score = 98.16, model_version = 'v1' WHERE transaction_id = ?", scored);
+        insertTransaction("PAYMENT", SMALL, "C_NO_ML", "M_Y", false, false, BigDecimal.ZERO, T0);   // ml_score NULL
+
+        PageResult<Transaction> desc = transactions.search(TransactionFilter.none(),
+                new PageQuery(0, 10, "mlScore", PageQuery.SortDirection.DESC));
+        assertThat(desc.content()).extracting(Transaction::nameOrig).containsExactly("C_ML", "C_NO_ML");
+        assertThat(desc.content().get(0).mlScore()).isEqualByComparingTo("98.16");
+        assertThat(desc.content().get(0).modelVersion()).isEqualTo("v1");
+
+        PageResult<Transaction> asc = transactions.search(TransactionFilter.none(),
+                new PageQuery(0, 10, "mlScore", PageQuery.SortDirection.ASC));
+        assertThat(asc.content()).extracting(Transaction::nameOrig).containsExactly("C_ML", "C_NO_ML");
+    }
+
+    @Test
     void grouped_counts_return_native_enums_and_rules() {
         UUID tx = insertTransaction("TRANSFER", BIG, "C1", "C2", true, true, new BigDecimal("85"), T0);
         insertAlert(tx, "HIGH_AMOUNT", "HIGH", new BigDecimal("60"), "OPEN", T0);

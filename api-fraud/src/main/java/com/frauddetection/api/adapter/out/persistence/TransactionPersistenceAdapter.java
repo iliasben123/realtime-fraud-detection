@@ -28,7 +28,7 @@ class TransactionPersistenceAdapter implements TransactionRepository {
     @Override
     public PageResult<Transaction> search(TransactionFilter filter, PageQuery page) {
         return PersistenceMapper.toPageResult(
-                transactions.findAll(TransactionSpecifications.from(filter), PersistenceMapper.toPageable(page)),
+                transactions.findAll(TransactionSpecifications.from(filter, page), PersistenceMapper.toPageable(page)),
                 PersistenceMapper::toDomain);
     }
 

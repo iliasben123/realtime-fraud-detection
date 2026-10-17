@@ -3,21 +3,24 @@
 #  Démo de bout en bout : infra + pipeline + API, rejoue un lot de transactions
 #  et affiche les statistiques de détection.
 #
-#  Usage : scripts/demo.sh [--limit N] [--rate N] [--no-build] [--down]
+#  Usage : scripts/demo.sh [--limit N] [--rate N] [--no-build] [--train] [--down]
 #    --limit N    nombre de transactions à rejouer (défaut 5000)
 #    --rate N     débit en msg/s, 0 = max (défaut 0)
 #    --no-build   ne pas reconstruire les images
+#    --train      réentraîner le modèle MLlib même si une version existe
 #    --down       arrêter et purger la plateforme (volumes compris) puis quitter
 # ============================================================================
 set -euo pipefail
+export MSYS_NO_PATHCONV=1   # Git Bash : ne pas convertir les chemins /app/... passés aux conteneurs
 cd "$(dirname "$0")/.."
 
-LIMIT=5000; RATE=0; BUILD="--build"
+LIMIT=5000; RATE=0; BUILD="--build"; TRAIN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --limit) LIMIT="$2"; shift 2 ;;
     --rate) RATE="$2"; shift 2 ;;
     --no-build) BUILD=""; shift ;;
+    --train) TRAIN=1; shift ;;
     --down) docker compose --profile app --profile tools down -v; exit 0 ;;
     *) echo "option inconnue : $1"; exit 1 ;;
   esac
@@ -39,6 +42,15 @@ if [[ ! -f data/raw/paysim.csv ]]; then
     || { echo "Génération via Python local"; (cd ingestion && python -m producer.generate_sample_data --rows 50000); }
 fi
 echo "CSV : data/raw/paysim.csv ($(($(wc -l < data/raw/paysim.csv) - 1)) lignes)"
+
+step "Modèle MLlib"
+if [[ $TRAIN -eq 1 || ! -f models/fraud_gbt/latest ]]; then
+  echo "Entraînement du modèle sur data/raw/paysim.csv (quelques minutes)"
+  [[ -n "$BUILD" ]] && docker compose --profile app build spark
+  bash scripts/train_model.sh --no-restart
+else
+  echo "Modèle courant : $(tr -d '\r\n' < models/fraud_gbt/latest) (forcer un réentraînement : --train)"
+fi
 
 step "Infrastructure + Spark + API"
 docker compose --profile app up -d $BUILD kafka kafka-init kafka-ui postgres spark api

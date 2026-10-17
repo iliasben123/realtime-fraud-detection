@@ -3,6 +3,7 @@ package com.frauddetection.api.adapter.out.persistence;
 import com.frauddetection.api.adapter.out.persistence.entity.AlertEntity;
 import com.frauddetection.api.adapter.out.persistence.entity.TransactionEntity;
 import com.frauddetection.api.domain.model.AlertFilter;
+import com.frauddetection.api.domain.model.PageQuery;
 import jakarta.persistence.criteria.Fetch;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
@@ -18,8 +19,9 @@ final class AlertSpecifications {
     private AlertSpecifications() {
     }
 
-    static Specification<AlertEntity> from(AlertFilter f) {
+    static Specification<AlertEntity> from(AlertFilter f, PageQuery page) {
         return (root, query, cb) -> {
+            PersistenceMapper.applyOrder(query, cb, root, page);
             // Lecture : fetch join (transaction chargée en une requête) ; count : simple jointure
             Join<AlertEntity, TransactionEntity> tx;
             if (query != null && !Long.class.equals(query.getResultType())) {

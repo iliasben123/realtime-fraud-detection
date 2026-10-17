@@ -20,7 +20,7 @@ final class WebMapper {
     static final Set<String> ALERT_SORT_FIELDS =
             Set.of("createdAt", "updatedAt", "riskScore", "severity", "status", "ruleName");
     static final Set<String> TRANSACTION_SORT_FIELDS =
-            Set.of("eventTime", "processedAt", "amount", "riskScore", "type", "step");
+            Set.of("eventTime", "processedAt", "amount", "riskScore", "mlScore", "type", "step");
 
     private WebMapper() {
     }
@@ -34,7 +34,8 @@ final class WebMapper {
     static TransactionResponse toResponse(Transaction t) {
         return new TransactionResponse(t.id(), t.step(), t.eventTime(), t.processedAt(), t.type(), t.amount(),
                 t.nameOrig(), t.oldBalanceOrig(), t.newBalanceOrig(), t.nameDest(), t.oldBalanceDest(),
-                t.newBalanceDest(), t.fraud(), t.flaggedFraud(), t.riskScore(), t.suspicious());
+                t.newBalanceDest(), t.fraud(), t.flaggedFraud(), t.riskScore(), t.suspicious(),
+                t.mlScore(), t.modelVersion());
     }
 
     static AlertDetailResponse toResponse(AlertDetail d) {

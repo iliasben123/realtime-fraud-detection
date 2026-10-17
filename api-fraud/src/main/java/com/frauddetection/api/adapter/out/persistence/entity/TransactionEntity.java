@@ -66,6 +66,12 @@ public class TransactionEntity {
     @Column(name = "is_suspicious", nullable = false)
     private boolean suspicious;
 
+    @Column(name = "ml_score", precision = 5, scale = 2)
+    private BigDecimal mlScore;
+
+    @Column(name = "model_version", length = 32)
+    private String modelVersion;
+
     protected TransactionEntity() {
         // JPA
     }
@@ -86,4 +92,6 @@ public class TransactionEntity {
     public boolean isFlaggedFraud() { return flaggedFraud; }
     public BigDecimal getRiskScore() { return riskScore; }
     public boolean isSuspicious() { return suspicious; }
+    public BigDecimal getMlScore() { return mlScore; }
+    public String getModelVersion() { return modelVersion; }
 }

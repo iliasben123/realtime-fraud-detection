@@ -19,17 +19,18 @@ ADD ${MAVEN}/org/apache/kafka/kafka-clients/${KAFKA_CLIENTS_VERSION}/kafka-clien
 ADD ${MAVEN}/org/apache/commons/commons-pool2/${COMMONS_POOL2_VERSION}/commons-pool2-${COMMONS_POOL2_VERSION}.jar /opt/spark/jars/
 RUN chmod 644 /opt/spark/jars/*.jar
 
-RUN pip install --no-cache-dir psycopg2-binary==2.9.10 python-dotenv==1.0.1 pytest==8.3.3
+RUN pip install --no-cache-dir psycopg2-binary==2.9.10 python-dotenv==1.0.1 pytest==8.3.3 "numpy<2" "pandas<2.1"   # numpy/pandas requis par pyspark.ml
 
 WORKDIR /app
 COPY spark_jobs ./spark_jobs
 COPY tests ./tests
-RUN mkdir -p /app/checkpoints && chown -R spark:spark /app
+RUN mkdir -p /app/checkpoints /app/models && chown -R spark:spark /app
 
 # /opt/spark/python : pyspark est fourni par l'image (non installé via pip) -> nécessaire pour pytest
 ENV PYTHONPATH=/app:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip \
     PYSPARK_PYTHON=python3 \
-    SPARK_CHECKPOINT_DIR=/app/checkpoints
+    SPARK_CHECKPOINT_DIR=/app/checkpoints \
+    ML_MODEL_DIR=/app/models/fraud_gbt
 
 USER spark
 EXPOSE 4040

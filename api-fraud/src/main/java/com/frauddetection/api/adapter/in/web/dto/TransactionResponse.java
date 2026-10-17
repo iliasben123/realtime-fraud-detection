@@ -22,6 +22,8 @@ public record TransactionResponse(
         boolean fraud,
         boolean flaggedFraud,
         BigDecimal riskScore,
-        boolean suspicious
+        boolean suspicious,
+        BigDecimal mlScore,
+        String modelVersion
 ) {
 }

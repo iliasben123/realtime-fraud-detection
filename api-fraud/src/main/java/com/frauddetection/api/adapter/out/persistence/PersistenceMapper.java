@@ -9,10 +9,14 @@ import com.frauddetection.api.domain.model.AlertStatusChange;
 import com.frauddetection.api.domain.model.PageQuery;
 import com.frauddetection.api.domain.model.PageResult;
 import com.frauddetection.api.domain.model.Transaction;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Root;
+import org.hibernate.query.criteria.HibernateCriteriaBuilder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 
 import java.util.function.Function;
 
@@ -27,7 +31,8 @@ final class PersistenceMapper {
                 e.getTransactionId(), e.getStep(), e.getEventTime(), e.getProcessedAt(), e.getType(),
                 e.getAmount(), e.getNameOrig(), e.getOldBalanceOrig(), e.getNewBalanceOrig(),
                 e.getNameDest(), e.getOldBalanceDest(), e.getNewBalanceDest(),
-                e.isFraud(), e.isFlaggedFraud(), e.getRiskScore(), e.isSuspicious());
+                e.isFraud(), e.isFlaggedFraud(), e.getRiskScore(), e.isSuspicious(),
+                e.getMlScore(), e.getModelVersion());
     }
 
     static Alert toDomain(AlertEntity e) {
@@ -51,10 +56,25 @@ final class PersistenceMapper {
                 c.changedBy(), c.comment(), c.changedAt());
     }
 
+    /** Pagination sans tri : l'ordre est posé par la Specification (cf. applyOrder) pour gérer NULLS LAST. */
     static Pageable toPageable(PageQuery q) {
-        Sort.Direction direction = q.direction() == PageQuery.SortDirection.ASC
-                ? Sort.Direction.ASC : Sort.Direction.DESC;
-        return PageRequest.of(q.page(), q.size(), Sort.by(direction, q.sortBy()));
+        return PageRequest.of(q.page(), q.size());
+    }
+
+    /**
+     * Tri avec NULLS LAST : les colonnes optionnelles (ml_score, reviewed_by...) ne doivent pas remonter
+     * en tête d'un tri décroissant (comportement PostgreSQL par défaut). Spring Data ne propage pas la
+     * précédence des NULL vers les Criteria Queries, on passe par l'API Hibernate. Ignoré pour le count.
+     */
+    static void applyOrder(CriteriaQuery<?> query, CriteriaBuilder cb, Root<?> root, PageQuery q) {
+        if (query == null || Long.class.equals(query.getResultType()) || q == null) {
+            return;
+        }
+        HibernateCriteriaBuilder hcb = (HibernateCriteriaBuilder) cb;
+        Expression<?> column = root.get(q.sortBy());
+        query.orderBy(q.direction() == PageQuery.SortDirection.ASC
+                ? hcb.asc(column, false)
+                : hcb.desc(column, false));
     }
 
     static <E, D> PageResult<D> toPageResult(Page<E> page, Function<E, D> mapper) {

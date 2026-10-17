@@ -187,8 +187,12 @@ services:
       RULE_VELOCITY_WATERMARK: ${RULE_VELOCITY_WATERMARK:-2 minutes}
       RULE_VELOCITY_MAX_TX: ${RULE_VELOCITY_MAX_TX:-5}
       RULE_VELOCITY_MAX_AMOUNT: ${RULE_VELOCITY_MAX_AMOUNT:-500000}
+      ML_MODEL_DIR: /app/models/fraud_gbt
+      ML_MODEL_VERSION: ${ML_MODEL_VERSION:-}
     volumes:
       - spark-checkpoints:/app/checkpoints
+      - ./models:/app/models            # registre de modèles MLlib (scripts/train_model.sh)
+      - ./data:/app/data:ro             # CSV pour l'entraînement batch
     networks:
       - fraud-net
 

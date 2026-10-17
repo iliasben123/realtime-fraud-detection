@@ -21,6 +21,8 @@ public record Transaction(
         boolean fraud,
         boolean flaggedFraud,
         BigDecimal riskScore,
-        boolean suspicious
+        boolean suspicious,
+        BigDecimal mlScore,        // probabilité de fraude du modèle MLlib (x100), null si non scoré
+        String modelVersion
 ) {
 }

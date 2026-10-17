@@ -45,7 +45,7 @@ class AlertPersistenceAdapter implements AlertRepository {
     @Override
     public PageResult<AlertDetail> search(AlertFilter filter, PageQuery page) {
         return PersistenceMapper.toPageResult(
-                alerts.findAll(AlertSpecifications.from(filter), PersistenceMapper.toPageable(page)),
+                alerts.findAll(AlertSpecifications.from(filter, page), PersistenceMapper.toPageable(page)),
                 PersistenceMapper::toDetail);
     }
 

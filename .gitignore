@@ -34,3 +34,7 @@ spark-warehouse/
 processing/checkpoints/
 metastore_db/
 derby.log
+
+# Modèles MLlib (artefacts binaires, régénérés par scripts/train_model.sh)
+models/*
+!models/.gitkeep

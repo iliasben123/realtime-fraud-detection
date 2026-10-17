@@ -95,6 +95,19 @@ def build_stateless_rules(cfg: JobConfig) -> list[Rule]:
     ]
 
 
+def build_ml_rule(threshold: float, model_version: str) -> Rule:
+    """Règle alimentée par le modèle MLlib : nécessite la colonne `ml_probability` (cf. ml/scoring.py)."""
+    prob = F.col("ml_probability")
+    return Rule(
+        name="ML_HIGH_RISK",
+        severity="HIGH",
+        score=75,
+        predicate=prob >= threshold,
+        description=F.format_string("Probabilité de fraude %.3f >= seuil %.2f (modèle %s)",
+                                    prob, F.lit(float(threshold)), F.lit(model_version)),
+    )
+
+
 def apply_stateless_rules(df: DataFrame, rules: list[Rule]) -> DataFrame:
     """Ajoute à chaque transaction : un flag par règle, triggered_rules, risk_score, is_suspicious."""
     for rule in rules:
@@ -133,18 +146,22 @@ def explode_alerts(df: DataFrame, rules: list[Rule]) -> DataFrame:
             F.lit(r.score).cast("decimal(5,2)").alias("risk_score"),
         )) for r in rules
     ]))
+    triggered_names = F.array_compact(F.array(*[F.when(F.col(r.flag_col), F.lit(r.name)) for r in rules]))
+    for col in ("ml_score", "model_version"):
+        if col not in df.columns:
+            df = df.withColumn(col, F.lit(None))
     return (
-        df.filter(F.col("is_suspicious"))
+        df.filter(F.size(triggered_names) > 0)
           .select(
               "transaction_id", "event_time", "type", "amount", "name_orig", "name_dest",
-              "is_fraud", F.explode(alerts).alias("alert"))
+              "is_fraud", "ml_score", "model_version", F.explode(alerts).alias("alert"))
           .select(
               "transaction_id",
               F.col("alert.rule_name").alias("rule_name"),
               F.col("alert.description").alias("description"),
               F.col("alert.severity").alias("severity"),
               F.col("alert.risk_score").alias("risk_score"),
-              "event_time", "type", "amount", "name_orig", "name_dest", "is_fraud")
+              "event_time", "type", "amount", "name_orig", "name_dest", "is_fraud", "ml_score", "model_version")
     )
 
 

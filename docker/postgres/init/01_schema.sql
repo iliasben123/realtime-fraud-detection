@@ -37,7 +37,9 @@ CREATE TABLE IF NOT EXISTS fraud.transactions (
     is_fraud            BOOLEAN         NOT NULL DEFAULT FALSE,   -- label du dataset (vérité terrain)
     is_flagged_fraud    BOOLEAN         NOT NULL DEFAULT FALSE,   -- flag natif PaySim
     risk_score          NUMERIC(5, 2)   DEFAULT 0 CHECK (risk_score BETWEEN 0 AND 100),
-    is_suspicious       BOOLEAN         NOT NULL DEFAULT FALSE    -- résultat de nos règles de détection
+    is_suspicious       BOOLEAN         NOT NULL DEFAULT FALSE,   -- résultat des règles + modèle ML
+    ml_score            NUMERIC(5, 2)   CHECK (ml_score BETWEEN 0 AND 100),  -- probabilité de fraude du modèle MLlib (x100)
+    model_version       VARCHAR(32)                               -- version du modèle ayant produit ml_score
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_event_time ON fraud.transactions (event_time DESC);
