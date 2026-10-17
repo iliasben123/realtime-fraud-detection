@@ -215,16 +215,35 @@ scripts/train_model.sh                          # entraîne sur data/raw/paysim.
 scripts/train_model.sh --sample 0.2 --max-iter 40   # vrai PaySim (6,3 M lignes) : échantillonner
 ```
 
-Résultats sur l'échantillon synthétique (100 000 lignes, 121 fraudes, jeu de test 20 %) :
+Résultats sur le **vrai dataset PaySim** (échantillon de 30 %, soit 1,9 M lignes et 2 437 fraudes ;
+jeu de test de 381 768 lignes), `scripts/train_model.sh --sample 0.3` :
 
-| | Précision | Rappel | F1 |
-|---|---|---|---|
-| Règles seules | 0,012 | 1,00 | 0,024 |
-| Modèle GBT (seuil 0,50) | 1,00 | 1,00 | 1,00 |
+| Détecteur | Précision | Rappel | F1 | Faux positifs (test) | Fraudes manquées |
+|---|---|---|---|---|---|
+| Règles métier seules | 0,3 % | 99,6 % | 0,007 | 135 035 | 2 |
+| Modèle GBT (seuil 0,75) | 100 % | 99,8 % | 0,999 | 0 | 1 |
 
-> Le générateur synthétique produit un pattern de fraude trivialement séparable (le modèle est parfait,
-> AUC-PR = 1,0). Sur le vrai dataset PaySim, attendre un AUC-PR de l'ordre de 0,8 à 0,9 : c'est là que la
-> comparaison règles / modèle devient réellement informative.
+AUC-ROC 1,000, AUC-PR 0,9995. Le rapport complet (courbe précision / rappel par seuil, importance des
+features) est généré par `python scripts/model_report.py` : [docs/model_report.md](docs/model_report.md).
+
+Lecture métier : à volume égal, les règles seules auraient produit 135 000 alertes à traiter par les
+analystes pour 449 fraudes réelles, le modèle en produit 450 dont 450 fondées. Le seuil est un levier
+explicite : à 0,10 le rappel est total pour 195 faux positifs ; à partir de 0,60 il n'y en a plus.
+
+Et en conditions réelles de streaming, sur les 20 000 premières transactions du dataset rejouées via Kafka
+(81 fraudes), telles que mesurées dans PostgreSQL après traitement par le job Spark :
+
+| Règle | Alertes émises | dont fraudes avérées |
+|---|---|---|
+| `ML_HIGH_RISK` (modèle) | 78 | 78 |
+| `ACCOUNT_DRAIN` | 2 076 | 78 |
+| `HIGH_AMOUNT` | 3 786 | 78 |
+
+> Pourquoi un score aussi élevé ? PaySim est un simulateur : ses fraudes suivent un mécanisme déterministe
+> (vidage du compte, soldes incohérents) que les features `orig_emptied`, `error_balance_orig` et
+> `amount_over_balance` (96 % de l'importance) capturent presque parfaitement. C'est un résultat connu sur
+> ce dataset ; sur des données réelles, la fraude est bien moins séparable et c'est le suivi des décisions
+> analystes (statuts des alertes) qui permettrait de mesurer la précision réelle du modèle dans le temps.
 
 Tests (`tests/test_ml.py`) : features, entraînement sur jeu réduit, registre, scoring, intégration
 avec les règles et schéma de sortie avec et sans modèle.
