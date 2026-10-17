@@ -1,0 +1,44 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: fraud-api
+  datasource:
+    # Par défaut : PostgreSQL du docker-compose exposé sur l'hôte (port 5433)
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/frauddb}
+    username: ${SPRING_DATASOURCE_USERNAME:fraud}
+    password: ${SPRING_DATASOURCE_PASSWORD:fraud}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none          # le schéma est géré par docker/postgres/init/01_schema.sql
+    properties:
+      hibernate:
+        default_schema: fraud
+        jdbc.time_zone: UTC
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    com.frauddetection: INFO

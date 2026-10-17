@@ -1,0 +1,36 @@
+# Data
+data/raw/*.csv
+data/raw/*.zip
+!data/raw/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Java / Maven
+api-fraud/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Env / secrets
+.env
+*.log
+
+# Spark
+processing/checkpoints/
+spark-warehouse/
+
+# Spark (checkpoints locaux, métastore)
+processing/checkpoints/
+metastore_db/
+derby.log

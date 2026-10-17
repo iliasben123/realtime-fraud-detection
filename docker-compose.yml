@@ -1,0 +1,230 @@
+# ============================================================================
+#  Fraud Detection Platform - Infrastructure locale
+#  Kafka (mode KRaft, sans Zookeeper) + PostgreSQL + Kafka UI
+# ----------------------------------------------------------------------------
+#  Démarrage :  docker compose up -d
+#  Arrêt     :  docker compose down            (garde les volumes)
+#               docker compose down -v         (supprime les données)
+# ============================================================================
+
+services:
+
+  # --------------------------------------------------------------------------
+  # Kafka broker (KRaft : le broker joue aussi le rôle de controller,
+  # Zookeeper n'est plus nécessaire depuis Kafka 3.3+ / supprimé en 4.0)
+  # --------------------------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: fraud-kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"          # accès depuis la machine hôte (producer Python, Spark en local)
+    environment:
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 24
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server kafka:29092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    networks:
+      - fraud-net
+
+  # --------------------------------------------------------------------------
+  # Création des topics au démarrage (job one-shot)
+  # --------------------------------------------------------------------------
+  kafka-init:
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: fraud-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      echo 'Création des topics...'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic transactions --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic fraud-alerts  --partitions 3 --replication-factor 1
+      echo 'Topics disponibles :'
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "
+    networks:
+      - fraud-net
+
+  # --------------------------------------------------------------------------
+  # Interface web pour inspecter topics / messages / consumer groups
+  # http://localhost:8085
+  # --------------------------------------------------------------------------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: fraud-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8085:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "fraud-local"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:29092"
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks:
+      - fraud-net
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL : stockage des transactions analysées et des alertes
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: fraud-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fraud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraud}
+      POSTGRES_DB: ${POSTGRES_DB:-frauddb}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro   # scripts SQL exécutés au 1er démarrage
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fraud} -d ${POSTGRES_DB:-frauddb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fraud-net
+
+  # --------------------------------------------------------------------------
+  # pgAdmin (optionnel) : http://localhost:8086  (admin@fraud.local / admin)
+  # --------------------------------------------------------------------------
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: fraud-pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8086:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@fraud.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - fraud-net
+    profiles: ["tools"]      # démarré uniquement avec : docker compose --profile tools up -d
+
+  # ==========================================================================
+  #  Applicatif (profil "app") : docker compose --profile app up -d --build
+  # ==========================================================================
+
+  # --------------------------------------------------------------------------
+  # Producer Python : CSV PaySim -> topic `transactions`
+  # --------------------------------------------------------------------------
+  producer:
+    build: ./ingestion
+    container_name: fraud-producer
+    profiles: ["app"]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      KAFKA_TOPIC_TRANSACTIONS: transactions
+      CSV_PATH: /app/data/raw/paysim.csv
+      PRODUCER_RATE: ${PRODUCER_RATE:-50}
+      PRODUCER_LIMIT: ${PRODUCER_LIMIT:-0}
+    volumes:
+      - ./data:/app/data:ro
+    networks:
+      - fraud-net
+
+  # --------------------------------------------------------------------------
+  # Job Spark Structured Streaming : Kafka -> règles / fenêtres -> PostgreSQL + Kafka
+  # Spark UI : http://localhost:4040
+  # --------------------------------------------------------------------------
+  spark:
+    build: ./processing
+    container_name: fraud-spark
+    profiles: ["app"]
+    restart: on-failure      # reprise sur checkpoint après une erreur transitoire
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    ports:
+      - "4040:4040"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      KAFKA_TOPIC_TRANSACTIONS: transactions
+      KAFKA_TOPIC_ALERTS: fraud-alerts
+      SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-earliest}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-frauddb}
+      POSTGRES_USER: ${POSTGRES_USER:-fraud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraud}
+      RULE_HIGH_AMOUNT_THRESHOLD: ${RULE_HIGH_AMOUNT_THRESHOLD:-200000}
+      RULE_VELOCITY_WINDOW: ${RULE_VELOCITY_WINDOW:-5 minutes}
+      RULE_VELOCITY_SLIDE: ${RULE_VELOCITY_SLIDE:-1 minute}
+      RULE_VELOCITY_WATERMARK: ${RULE_VELOCITY_WATERMARK:-2 minutes}
+      RULE_VELOCITY_MAX_TX: ${RULE_VELOCITY_MAX_TX:-5}
+      RULE_VELOCITY_MAX_AMOUNT: ${RULE_VELOCITY_MAX_AMOUNT:-500000}
+    volumes:
+      - spark-checkpoints:/app/checkpoints
+    networks:
+      - fraud-net
+
+  # --------------------------------------------------------------------------
+  # API métier Java Spring Boot (architecture hexagonale)
+  # Swagger UI : http://localhost:8080/swagger-ui.html
+  # --------------------------------------------------------------------------
+  api:
+    build: ./api-fraud
+    container_name: fraud-api
+    profiles: ["app"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-frauddb}"
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-fraud}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-fraud}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - fraud-net
+
+volumes:
+  kafka-data:
+  postgres-data:
+  pgadmin-data:
+  spark-checkpoints:
+
+networks:
+  fraud-net:
+    name: fraud-net
+    driver: bridge
