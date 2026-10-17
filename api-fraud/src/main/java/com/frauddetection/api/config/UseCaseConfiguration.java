@@ -1,10 +1,12 @@
 package com.frauddetection.api.config;
 
 import com.frauddetection.api.application.AlertService;
+import com.frauddetection.api.application.ModelStatisticsService;
 import com.frauddetection.api.application.StatisticsService;
 import com.frauddetection.api.application.TransactionService;
 import com.frauddetection.api.domain.port.out.AlertRepository;
 import com.frauddetection.api.domain.port.out.AlertStatusHistoryRepository;
+import com.frauddetection.api.domain.port.out.ModelStatisticsRepository;
 import com.frauddetection.api.domain.port.out.TransactionRepository;
 import com.frauddetection.api.domain.port.out.UnitOfWork;
 import org.springframework.context.annotation.Bean;
@@ -38,5 +40,10 @@ public class UseCaseConfiguration {
     @Bean
     StatisticsService statisticsService(TransactionRepository transactions, AlertRepository alerts) {
         return new StatisticsService(transactions, alerts);
+    }
+
+    @Bean
+    ModelStatisticsService modelStatisticsService(ModelStatisticsRepository repository) {
+        return new ModelStatisticsService(repository);
     }
 }

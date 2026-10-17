@@ -213,6 +213,8 @@ services:
       SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-frauddb}"
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-fraud}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-fraud}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-dev-only-secret-change-me-fraud-detection-platform-2026}
+      APP_JWT_TTL: ${APP_JWT_TTL:-8h}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
       interval: 10s

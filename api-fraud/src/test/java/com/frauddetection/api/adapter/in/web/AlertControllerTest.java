@@ -1,7 +1,9 @@
 package com.frauddetection.api.adapter.in.web;
 
+import com.frauddetection.api.adapter.in.web.security.SecurityConfiguration;
 import com.frauddetection.api.config.UseCaseConfiguration;
 import com.frauddetection.api.domain.exception.AlertNotFoundException;
+import com.frauddetection.api.domain.exception.InsufficientPrivilegesException;
 import com.frauddetection.api.domain.exception.InvalidStatusTransitionException;
 import com.frauddetection.api.domain.model.Alert;
 import com.frauddetection.api.domain.model.AlertDetail;
@@ -10,6 +12,8 @@ import com.frauddetection.api.domain.model.AlertSeverity;
 import com.frauddetection.api.domain.model.AlertStatus;
 import com.frauddetection.api.domain.model.PageQuery;
 import com.frauddetection.api.domain.model.PageResult;
+import com.frauddetection.api.domain.model.Reviewer;
+import com.frauddetection.api.domain.model.ReviewerRole;
 import com.frauddetection.api.domain.model.Transaction;
 import com.frauddetection.api.domain.model.TransactionType;
 import com.frauddetection.api.domain.port.in.AlertQueryUseCase;
@@ -20,13 +24,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithAnonymousUser;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +49,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = AlertController.class,
         excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = UseCaseConfiguration.class))
+@Import(SecurityConfiguration.class)
+@WithMockUser(username = "analyst", roles = "ANALYST")
 class AlertControllerTest {
 
     @Autowired MockMvc mvc;
@@ -108,21 +118,24 @@ class AlertControllerTest {
     }
 
     @Test
-    void patch_status_returns_updated_alert() throws Exception {
+    void patch_status_uses_authenticated_user_as_reviewer() throws Exception {
         AlertDetail d = detail(AlertStatus.OPEN);
         Alert confirmed = d.alert().transitionTo(AlertStatus.CONFIRMED_FRAUD, "analyst", "ok", T);
-        when(statusUseCase.changeStatus(eq(d.alert().id()), eq(AlertStatus.CONFIRMED_FRAUD), eq("analyst"), eq("ok")))
+        when(statusUseCase.changeStatus(eq(d.alert().id()), eq(AlertStatus.CONFIRMED_FRAUD), any(Reviewer.class), eq("ok")))
                 .thenReturn(confirmed);
 
         mvc.perform(patch("/api/v1/alerts/{id}/status", d.alert().id())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"status":"CONFIRMED_FRAUD","reviewedBy":"analyst","comment":"ok"}
-                                """))
+                        .content("{\"status\":\"CONFIRMED_FRAUD\",\"comment\":\"ok\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CONFIRMED_FRAUD"))
                 .andExpect(jsonPath("$.reviewedBy").value("analyst"))
                 .andExpect(jsonPath("$.allowedTransitions[0]").value("BLOCKED"));
+
+        ArgumentCaptor<Reviewer> reviewer = ArgumentCaptor.forClass(Reviewer.class);
+        verify(statusUseCase).changeStatus(eq(d.alert().id()), eq(AlertStatus.CONFIRMED_FRAUD), reviewer.capture(), eq("ok"));
+        assertThat(reviewer.getValue().username()).isEqualTo("analyst");
+        assertThat(reviewer.getValue().roles()).containsExactly(ReviewerRole.ANALYST);
     }
 
     @Test
@@ -141,11 +154,37 @@ class AlertControllerTest {
     }
 
     @Test
+    void patch_block_by_analyst_is_forbidden() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(statusUseCase.changeStatus(eq(id), eq(AlertStatus.BLOCKED), any(), any()))
+                .thenThrow(new InsufficientPrivilegesException(
+                        new Reviewer("analyst", Set.of(ReviewerRole.ANALYST)), AlertStatus.BLOCKED));
+
+        mvc.perform(patch("/api/v1/alerts/{id}/status", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"BLOCKED\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.title").value("Habilitation insuffisante"))
+                .andExpect(jsonPath("$.username").value("analyst"))
+                .andExpect(jsonPath("$.requestedStatus").value("BLOCKED"));
+    }
+
+    @Test
     void patch_without_status_fails_validation() throws Exception {
         mvc.perform(patch("/api/v1/alerts/{id}/status", UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"reviewedBy\":\"analyst\"}"))
+                        .content("{\"comment\":\"sans statut\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors.status").exists());
+    }
+
+    @Test
+    @WithAnonymousUser
+    void endpoints_require_authentication() throws Exception {
+        mvc.perform(get("/api/v1/alerts")).andExpect(status().isUnauthorized());
+        mvc.perform(patch("/api/v1/alerts/{id}/status", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"UNDER_REVIEW\"}"))
+                .andExpect(status().isUnauthorized());
     }
 }

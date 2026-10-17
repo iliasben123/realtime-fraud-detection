@@ -1,10 +1,12 @@
 package com.frauddetection.api.adapter.in.web;
 
 import com.frauddetection.api.domain.exception.AlertNotFoundException;
+import com.frauddetection.api.domain.exception.InsufficientPrivilegesException;
 import com.frauddetection.api.domain.exception.InvalidStatusTransitionException;
 import com.frauddetection.api.domain.exception.TransactionNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -32,6 +34,22 @@ class GlobalExceptionHandler {
         pd.setProperty("currentStatus", ex.getFrom());
         pd.setProperty("requestedStatus", ex.getTo());
         pd.setProperty("allowedTransitions", ex.getFrom().allowedTransitions());
+        return pd;
+    }
+
+    @ExceptionHandler(InsufficientPrivilegesException.class)
+    ProblemDetail forbidden(InsufficientPrivilegesException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        pd.setTitle("Habilitation insuffisante");
+        pd.setProperty("username", ex.getUsername());
+        pd.setProperty("requestedStatus", ex.getTarget());
+        return pd;
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    ProblemDetail unauthorized(AuthenticationException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Identifiants invalides");
+        pd.setTitle("Authentification échouée");
         return pd;
     }
 

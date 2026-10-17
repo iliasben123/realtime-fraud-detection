@@ -5,6 +5,7 @@ import com.frauddetection.api.adapter.in.web.dto.AlertResponse;
 import com.frauddetection.api.adapter.in.web.dto.PageResponse;
 import com.frauddetection.api.adapter.in.web.dto.StatusHistoryResponse;
 import com.frauddetection.api.adapter.in.web.dto.StatusUpdateRequest;
+import com.frauddetection.api.adapter.in.web.security.ReviewerMapper;
 import com.frauddetection.api.domain.model.AlertFilter;
 import com.frauddetection.api.domain.model.AlertSeverity;
 import com.frauddetection.api.domain.model.AlertStatus;
@@ -15,6 +16,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -79,9 +81,11 @@ class AlertController {
     @Operation(summary = "Changer le statut d'une alerte",
             description = "Transitions autorisées : OPEN -> UNDER_REVIEW | CONFIRMED_FRAUD | FALSE_POSITIVE | BLOCKED ; "
                     + "UNDER_REVIEW -> CONFIRMED_FRAUD | FALSE_POSITIVE | BLOCKED ; CONFIRMED_FRAUD -> BLOCKED. "
-                    + "Une transition interdite renvoie 409.")
-    AlertResponse changeStatus(@PathVariable UUID alertId, @Valid @RequestBody StatusUpdateRequest request) {
-        return WebMapper.toResponse(
-                statusUseCase.changeStatus(alertId, request.status(), request.reviewedBy(), request.comment()));
+                    + "Une transition interdite renvoie 409. BLOCKED exige le rôle SUPERVISOR (403 sinon). "
+                    + "Le relecteur tracé est l'utilisateur authentifié.")
+    AlertResponse changeStatus(@PathVariable UUID alertId, @Valid @RequestBody StatusUpdateRequest request,
+                               Authentication authentication) {
+        return WebMapper.toResponse(statusUseCase.changeStatus(
+                alertId, request.status(), ReviewerMapper.from(authentication), request.comment()));
     }
 }

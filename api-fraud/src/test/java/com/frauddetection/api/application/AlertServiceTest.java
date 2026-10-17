@@ -1,11 +1,14 @@
 package com.frauddetection.api.application;
 
 import com.frauddetection.api.domain.exception.AlertNotFoundException;
+import com.frauddetection.api.domain.exception.InsufficientPrivilegesException;
 import com.frauddetection.api.domain.exception.InvalidStatusTransitionException;
 import com.frauddetection.api.domain.model.Alert;
 import com.frauddetection.api.domain.model.AlertSeverity;
 import com.frauddetection.api.domain.model.AlertStatus;
 import com.frauddetection.api.domain.model.AlertStatusChange;
+import com.frauddetection.api.domain.model.Reviewer;
+import com.frauddetection.api.domain.model.ReviewerRole;
 import com.frauddetection.api.domain.port.out.AlertRepository;
 import com.frauddetection.api.domain.port.out.AlertStatusHistoryRepository;
 import com.frauddetection.api.domain.port.out.UnitOfWork;
@@ -21,6 +24,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -35,6 +39,8 @@ import static org.mockito.Mockito.when;
 class AlertServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-02-01T09:30:00Z");
+    private static final Reviewer ANALYST = new Reviewer("analyst", Set.of(ReviewerRole.ANALYST));
+    private static final Reviewer SUPERVISOR = new Reviewer("supervisor", Set.of(ReviewerRole.ANALYST, ReviewerRole.SUPERVISOR));
 
     @Mock AlertRepository alerts;
     @Mock AlertStatusHistoryRepository history;
@@ -61,15 +67,15 @@ class AlertServiceTest {
     }
 
     @Test
-    void changeStatus_saves_alert_and_appends_history() {
+    void changeStatus_saves_alert_and_appends_history_with_reviewer_username() {
         Alert open = alert(AlertStatus.OPEN);
         when(alerts.findById(open.id())).thenReturn(Optional.of(open));
         when(alerts.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        Alert result = service.changeStatus(open.id(), AlertStatus.CONFIRMED_FRAUD, "analyst", "confirmé");
+        Alert result = service.changeStatus(open.id(), AlertStatus.CONFIRMED_FRAUD, ANALYST, "confirmé");
 
         assertThat(result.status()).isEqualTo(AlertStatus.CONFIRMED_FRAUD);
-        assertThat(result.updatedAt()).isEqualTo(NOW);     // le repository (mock) renvoie l'alerte telle que sauvée
+        assertThat(result.updatedAt()).isEqualTo(NOW);
         assertThat(result.reviewedBy()).isEqualTo("analyst");
 
         ArgumentCaptor<AlertStatusChange> captor = ArgumentCaptor.forClass(AlertStatusChange.class);
@@ -78,6 +84,7 @@ class AlertServiceTest {
         assertThat(change.alertId()).isEqualTo(open.id());
         assertThat(change.previousStatus()).isEqualTo(AlertStatus.OPEN);
         assertThat(change.newStatus()).isEqualTo(AlertStatus.CONFIRMED_FRAUD);
+        assertThat(change.changedBy()).isEqualTo("analyst");
         assertThat(change.comment()).isEqualTo("confirmé");
         assertThat(change.changedAt()).isEqualTo(NOW);
     }
@@ -87,7 +94,7 @@ class AlertServiceTest {
         Alert blocked = alert(AlertStatus.BLOCKED);
         when(alerts.findById(blocked.id())).thenReturn(Optional.of(blocked));
 
-        assertThatThrownBy(() -> service.changeStatus(blocked.id(), AlertStatus.OPEN, "analyst", null))
+        assertThatThrownBy(() -> service.changeStatus(blocked.id(), AlertStatus.OPEN, ANALYST, null))
                 .isInstanceOf(InvalidStatusTransitionException.class);
 
         verify(alerts, never()).save(any());
@@ -95,11 +102,36 @@ class AlertServiceTest {
     }
 
     @Test
+    void analyst_cannot_block_and_nothing_is_touched() {
+        UUID alertId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> service.changeStatus(alertId, AlertStatus.BLOCKED, ANALYST, "bloquer"))
+                .isInstanceOf(InsufficientPrivilegesException.class)
+                .hasMessageContaining("analyst");
+
+        verify(alerts, never()).findById(any());
+        verify(alerts, never()).save(any());
+        verify(history, never()).append(any());
+    }
+
+    @Test
+    void supervisor_can_block() {
+        Alert open = alert(AlertStatus.OPEN);
+        when(alerts.findById(open.id())).thenReturn(Optional.of(open));
+        when(alerts.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Alert result = service.changeStatus(open.id(), AlertStatus.BLOCKED, SUPERVISOR, "compte bloqué");
+
+        assertThat(result.status()).isEqualTo(AlertStatus.BLOCKED);
+        assertThat(result.reviewedBy()).isEqualTo("supervisor");
+    }
+
+    @Test
     void changeStatus_unknown_alert_throws_not_found() {
         UUID unknown = UUID.randomUUID();
         when(alerts.findById(unknown)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.changeStatus(unknown, AlertStatus.BLOCKED, "analyst", null))
+        assertThatThrownBy(() -> service.changeStatus(unknown, AlertStatus.BLOCKED, SUPERVISOR, null))
                 .isInstanceOf(AlertNotFoundException.class)
                 .hasMessageContaining(unknown.toString());
     }

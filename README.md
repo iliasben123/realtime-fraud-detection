@@ -253,7 +253,7 @@ avec les règles et schéma de sortie avec et sans modèle.
 ```
 api-fraud/src/main/java/com/frauddetection/api
 ├── domain/            cœur métier, sans aucune dépendance framework
-│   ├── model/         Alert, Transaction, AlertStatus (machine à états), filtres, pagination
+│   ├── model/         Alert, Transaction, AlertStatus (machine à états), Reviewer + ReviewPolicy, statistiques
 │   ├── exception/     AlertNotFound, InvalidStatusTransition...
 │   └── port/
 │       ├── in/        cas d'utilisation exposés (AlertQueryUseCase, AlertStatusUseCase...)
@@ -261,6 +261,7 @@ api-fraud/src/main/java/com/frauddetection/api
 ├── application/       implémentation des cas d'utilisation (AlertService...)
 ├── adapter/
 │   ├── in/web/        contrôleurs REST, DTO, gestion des erreurs (RFC 9457)
+│   │   └── security/  JWT (login, filtre resource server), mapping utilisateur -> Reviewer du domaine
 │   └── out/persistence/ entités JPA, Spring Data, Specifications, adaptateurs des ports
 └── config/            câblage Spring des cas d'utilisation
 ```
@@ -271,13 +272,16 @@ Les règles de dépendance sont vérifiées par un test ArchUnit (`HexagonalArch
 
 | Méthode | Route | Description |
 |---|---|---|
+| POST | `/api/v1/auth/login` | obtention d'un jeton JWT (`{"username","password"}`), route publique |
 | GET | `/api/v1/alerts` | recherche paginée : `status`, `severity`, `ruleName`, `account`, `minAmount`, `minRiskScore`, `from`, `to`, `page`, `size`, `sortBy`, `direction` |
 | GET | `/api/v1/alerts/{id}` | alerte + transaction associée |
 | GET | `/api/v1/alerts/{id}/history` | historique des changements de statut |
-| PATCH | `/api/v1/alerts/{id}/status` | changer le statut : `{"status":"CONFIRMED_FRAUD","reviewedBy":"...","comment":"..."}` |
+| PATCH | `/api/v1/alerts/{id}/status` | changer le statut : `{"status":"CONFIRMED_FRAUD","comment":"..."}` ; relecteur = utilisateur authentifié ; `BLOCKED` réservé au rôle SUPERVISOR |
 | GET | `/api/v1/transactions` | recherche paginée : `suspicious`, `fraud`, `type`, `account`, `minAmount`, `maxAmount`, `minRiskScore`, `from`, `to`... |
 | GET | `/api/v1/transactions/{id}` | transaction + alertes déclenchées |
 | GET | `/api/v1/stats/overview` | volumes, précision / rappel vs label PaySim, répartition des alertes |
+| GET | `/api/v1/stats/models` | qualité par version de modèle MLlib, croisée avec les décisions des analystes |
+| GET | `/api/v1/stats/rules` | retour des analystes et du label par règle |
 
 Cycle de vie d'une alerte (transition interdite → HTTP 409) :
 
@@ -287,24 +291,53 @@ OPEN ─► UNDER_REVIEW ─► CONFIRMED_FRAUD ─► BLOCKED
   └── raccourcis directs vers CONFIRMED_FRAUD / FALSE_POSITIVE / BLOCKED
 ```
 
-Exemples :
+### Authentification et rôles
+
+API stateless sécurisée par JWT (HS256). Deux rôles, portés par le domaine (`ReviewerRole`) :
+
+| Rôle | Droits |
+|---|---|
+| `ANALYST` | consulter, passer en revue, confirmer une fraude, classer en faux positif |
+| `SUPERVISOR` | idem, plus **bloquer** (`BLOCKED`) : la règle est dans le domaine (`ReviewPolicy`), pas dans la configuration web |
+
+Comptes de démonstration (`application.yml`, mots de passe bcrypt) : `analyst / analyst123` et
+`supervisor / supervisor123`. Le secret de signature se surcharge par `APP_JWT_SECRET` (`.env`).
+Swagger UI, la documentation OpenAPI et le health check restent publics ; tout `/api/v1/**` exige un jeton.
 
 ```bash
-curl "http://localhost:8080/api/v1/alerts?status=OPEN&severity=CRITICAL&size=5"
-curl "http://localhost:8080/api/v1/transactions?suspicious=true&minAmount=100000"
-curl -X PATCH http://localhost:8080/api/v1/alerts/<id>/status \
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
      -H "Content-Type: application/json" \
-     -d '{"status":"CONFIRMED_FRAUD","reviewedBy":"analyst.jdoe","comment":"Client contacté"}'
-curl http://localhost:8080/api/v1/stats/overview
+     -d '{"username":"supervisor","password":"supervisor123"}' | jq -r .accessToken)
+
+curl -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/alerts?status=OPEN&severity=CRITICAL&size=5"
+curl -X PATCH http://localhost:8080/api/v1/alerts/<id>/status \
+     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"status":"BLOCKED","comment":"Compte mule confirmé"}'
 ```
+
+Le relecteur tracé dans l'alerte et l'historique est l'utilisateur authentifié : il n'est plus fourni dans
+le corps de la requête. Un analyste qui tente `BLOCKED` reçoit un 403 Problem Details ; sans jeton, 401.
+
+### Suivi de la qualité de détection
+
+Deux endpoints croisent les alertes avec, d'une part le label du dataset, d'autre part les décisions des
+analystes (`CONFIRMED_FRAUD` / `BLOCKED` = fondée, `FALSE_POSITIVE` = infondée, `OPEN` / `UNDER_REVIEW` = en attente) :
+
+| Route | Contenu |
+|---|---|
+| `GET /api/v1/stats/models` | par version de modèle MLlib : transactions scorées, alertes `ML_HIGH_RISK`, précision / rappel contre le label, **précision terrain** (décisions analystes), taux de revue, score moyen |
+| `GET /api/v1/stats/rules` | par règle (métier ou ML) : alertes émises, part sur fraude labellisée, confirmées / faux positifs / en attente |
+
+C'est la boucle de retour qui permet, en production sans label, de suivre la dérive d'un modèle version
+après version et de comparer l'utilité réelle de chaque règle.
 
 Tests :
 
 ```bash
 cd api-fraud
-mvn test       # unitaires : domaine, service (Mockito), contrôleur (@WebMvcTest), ArchUnit
+mvn test       # unitaires : domaine (machine à états, habilitations), service (Mockito), contrôleur (@WebMvcTest + sécurité), ArchUnit
 mvn verify     # + intégration (*IT) : PostgreSQL 16 réel via Testcontainers, initialisé avec
-               #   docker/postgres/init/01_schema.sql ; adaptateurs JPA et scénario HTTP de bout en bout
+               #   docker/postgres/init/01_schema.sql ; adaptateurs JPA, statistiques, scénario HTTP JWT de bout en bout
 ```
 
 > Windows + Docker Desktop : Testcontainers cherche le pipe `docker_engine`, Docker Desktop expose

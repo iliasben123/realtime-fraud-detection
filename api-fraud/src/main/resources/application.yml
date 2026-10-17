@@ -22,6 +22,20 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
+app:
+  security:
+    # Secret HS256 (>= 32 octets). À SURCHARGER hors développement : APP_JWT_SECRET
+    jwt-secret: ${APP_JWT_SECRET:dev-only-secret-change-me-fraud-detection-platform-2026}
+    token-ttl: ${APP_JWT_TTL:8h}
+    # Comptes de démonstration (mots de passe bcrypt) : analyst / analyst123, supervisor / supervisor123
+    users:
+      - username: analyst
+        password: "$2b$10$M3eufiIDPCqwsgHELZEEW.VxVOOTN9DQrnbc8XKxx1H3bkCOWVK2W"
+        roles: [ANALYST]
+      - username: supervisor
+        password: "$2b$10$DYHXbYaAyhiq5GQ/FOGVZuqmMg6Nsq5r/iEqFt7f3rZXK2ixMAkd6"
+        roles: [ANALYST, SUPERVISOR]
+
 management:
   endpoints:
     web:

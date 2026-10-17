@@ -2,6 +2,8 @@ package com.frauddetection.api.adapter.in.web;
 
 import com.frauddetection.api.adapter.in.web.dto.AlertDetailResponse;
 import com.frauddetection.api.adapter.in.web.dto.AlertResponse;
+import com.frauddetection.api.adapter.in.web.dto.ModelVersionStatisticsResponse;
+import com.frauddetection.api.adapter.in.web.dto.RuleFeedbackResponse;
 import com.frauddetection.api.adapter.in.web.dto.StatisticsResponse;
 import com.frauddetection.api.adapter.in.web.dto.StatusHistoryResponse;
 import com.frauddetection.api.adapter.in.web.dto.TransactionResponse;
@@ -9,7 +11,9 @@ import com.frauddetection.api.domain.model.Alert;
 import com.frauddetection.api.domain.model.AlertDetail;
 import com.frauddetection.api.domain.model.AlertStatistics;
 import com.frauddetection.api.domain.model.AlertStatusChange;
+import com.frauddetection.api.domain.model.ModelVersionStatistics;
 import com.frauddetection.api.domain.model.PageQuery;
+import com.frauddetection.api.domain.model.RuleFeedback;
 import com.frauddetection.api.domain.model.Transaction;
 
 import java.util.Set;
@@ -51,6 +55,20 @@ final class WebMapper {
         return new StatisticsResponse(s.totalTransactions(), s.suspiciousTransactions(),
                 s.labeledFraudTransactions(), s.truePositives(), round(s.precision()), round(s.recall()),
                 s.totalAlerts(), s.alertsByStatus(), s.alertsBySeverity(), s.alertsByRule());
+    }
+
+    static ModelVersionStatisticsResponse toResponse(ModelVersionStatistics s) {
+        return new ModelVersionStatisticsResponse(s.modelVersion(), s.scoredTransactions(), s.labeledFraud(),
+                s.mlAlerts(), s.mlAlertsOnLabeledFraud(), s.mlAlertsConfirmed(), s.mlAlertsFalsePositive(),
+                s.mlAlertsPending(), round(s.precisionVsLabel()), round(s.recallVsLabel()),
+                round(s.precisionVsAnalysts()), round(s.reviewRate()), s.avgMlScore(), s.avgMlScoreOnFraud(),
+                s.firstScoredAt(), s.lastScoredAt());
+    }
+
+    static RuleFeedbackResponse toResponse(RuleFeedback f) {
+        return new RuleFeedbackResponse(f.ruleName(), f.alerts(), f.onLabeledFraud(), f.confirmed(),
+                f.falsePositive(), f.pending(), round(f.precisionVsLabel()), round(f.precisionVsAnalysts()),
+                round(f.reviewRate()));
     }
 
     static PageQuery toPageQuery(int page, int size, String sortBy, String direction, Set<String> allowedSorts) {

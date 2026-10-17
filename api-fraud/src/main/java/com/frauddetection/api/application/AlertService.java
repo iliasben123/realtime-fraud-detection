@@ -8,6 +8,8 @@ import com.frauddetection.api.domain.model.AlertStatus;
 import com.frauddetection.api.domain.model.AlertStatusChange;
 import com.frauddetection.api.domain.model.PageQuery;
 import com.frauddetection.api.domain.model.PageResult;
+import com.frauddetection.api.domain.model.ReviewPolicy;
+import com.frauddetection.api.domain.model.Reviewer;
 import com.frauddetection.api.domain.port.in.AlertQueryUseCase;
 import com.frauddetection.api.domain.port.in.AlertStatusUseCase;
 import com.frauddetection.api.domain.port.out.AlertRepository;
@@ -57,10 +59,11 @@ public class AlertService implements AlertQueryUseCase, AlertStatusUseCase {
     }
 
     @Override
-    public Alert changeStatus(UUID alertId, AlertStatus target, String reviewedBy, String comment) {
+    public Alert changeStatus(UUID alertId, AlertStatus target, Reviewer reviewer, String comment) {
+        ReviewPolicy.require(reviewer, target);
         return unitOfWork.execute(() -> {
             Alert current = alerts.findById(alertId).orElseThrow(() -> new AlertNotFoundException(alertId));
-            Alert updated = current.transitionTo(target, reviewedBy, comment, Instant.now(clock));
+            Alert updated = current.transitionTo(target, reviewer.username(), comment, Instant.now(clock));
             Alert saved = alerts.save(updated);
             history.append(AlertStatusChange.of(current, saved));
             return saved;
