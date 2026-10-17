@@ -1,6 +1,6 @@
 # Plateforme de détection de fraude en temps réel
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/iliasben123/realtime-fraud-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/iliasben123/realtime-fraud-detection/actions/workflows/ci.yml)
 
 Projet portfolio Data Engineering / Backend simulant une plateforme de détection de fraudes
 bancaires en streaming, à partir du dataset [PaySim](https://www.kaggle.com/datasets/ealaxi/paysim1).
