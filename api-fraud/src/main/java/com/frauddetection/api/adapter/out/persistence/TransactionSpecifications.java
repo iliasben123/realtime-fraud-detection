@@ -16,7 +16,7 @@ final class TransactionSpecifications {
 
     static Specification<TransactionEntity> from(TransactionFilter f, PageQuery page) {
         return (root, query, cb) -> {
-            PersistenceMapper.applyOrder(query, cb, root, page);
+            PersistenceMapper.applyOrder(query, cb, root, page, "eventTime");
             List<Predicate> p = new ArrayList<>();
             if (f.suspicious() != null) {
                 p.add(cb.equal(root.get("suspicious"), f.suspicious()));

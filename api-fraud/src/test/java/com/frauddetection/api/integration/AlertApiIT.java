@@ -68,6 +68,31 @@ class AlertApiIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void me_returns_identity_and_block_capability() {
+        JsonNode analyst = get(login("analyst", "analyst123"), "/api/v1/auth/me");
+        assertThat(analyst.get("username").asText()).isEqualTo("analyst");
+        assertThat(analyst.get("canBlock").asBoolean()).isFalse();
+
+        JsonNode supervisor = get(login("supervisor", "supervisor123"), "/api/v1/auth/me");
+        assertThat(supervisor.get("roles")).hasSize(2);
+        assertThat(supervisor.get("canBlock").asBoolean()).isTrue();
+
+        assertThat(http.getForEntity("/api/v1/auth/me", String.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void alerts_default_order_is_risk_score_then_date() {
+        UUID tx = insertTransaction("TRANSFER", new BigDecimal("1000.00"), "C1", "C2", false, true, new BigDecimal("90"), T0);
+        insertAlert(tx, "LOW_OLD", "LOW", new BigDecimal("25"), "OPEN", T0);
+        insertAlert(tx, "HIGH_OLD", "HIGH", new BigDecimal("85"), "OPEN", T0);
+        insertAlert(tx, "HIGH_NEW", "HIGH", new BigDecimal("85"), "OPEN", T0.plusSeconds(60));
+
+        JsonNode page = get(login("analyst", "analyst123"), "/api/v1/alerts");
+        assertThat(page.findValues("ruleName")).extracting(JsonNode::asText)
+                .containsExactly("HIGH_NEW", "HIGH_OLD", "LOW_OLD");
+    }
+
+    @Test
     void api_requires_a_valid_token() {
         ResponseEntity<String> anonymous = http.getForEntity("/api/v1/alerts", String.class);
         assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);

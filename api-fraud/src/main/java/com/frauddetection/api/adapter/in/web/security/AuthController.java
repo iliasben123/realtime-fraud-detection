@@ -9,6 +9,8 @@ import jakarta.validation.constraints.NotBlank;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import com.frauddetection.api.domain.model.Reviewer;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,6 +40,19 @@ class AuthController {
                 UsernamePasswordAuthenticationToken.unauthenticated(request.username(), request.password()));
         JwtTokenService.Token token = tokens.issue(authentication);
         return new LoginResponse(token.accessToken(), "Bearer", token.expiresAt(), token.username(), token.roles());
+    }
+
+    @GetMapping("/me")
+    @Operation(summary = "Utilisateur courant",
+            description = "Identité et rôles portés par le jeton : permet au client de restaurer sa session.")
+    MeResponse me(Authentication authentication) {
+        Reviewer reviewer = ReviewerMapper.from(authentication);
+        return new MeResponse(reviewer.username(),
+                reviewer.roles().stream().map(Enum::name).sorted().toList(),
+                reviewer.isSupervisor());
+    }
+
+    record MeResponse(String username, List<String> roles, boolean canBlock) {
     }
 
     record LoginRequest(

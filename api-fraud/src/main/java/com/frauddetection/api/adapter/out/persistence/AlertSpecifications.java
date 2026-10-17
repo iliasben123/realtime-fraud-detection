@@ -21,7 +21,7 @@ final class AlertSpecifications {
 
     static Specification<AlertEntity> from(AlertFilter f, PageQuery page) {
         return (root, query, cb) -> {
-            PersistenceMapper.applyOrder(query, cb, root, page);
+            PersistenceMapper.applyOrder(query, cb, root, page, "createdAt");
             // Lecture : fetch join (transaction chargée en une requête) ; count : simple jointure
             Join<AlertEntity, TransactionEntity> tx;
             if (query != null && !Long.class.equals(query.getResultType())) {

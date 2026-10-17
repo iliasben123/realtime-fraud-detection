@@ -224,6 +224,22 @@ services:
     networks:
       - fraud-net
 
+  # --------------------------------------------------------------------------
+  # Console analyste (React + Vite) servie par nginx, qui proxifie /api vers l'API
+  # http://localhost:3000 (FRONT_PORT)
+  # --------------------------------------------------------------------------
+  frontend:
+    build: ./frontend
+    container_name: fraud-frontend
+    profiles: ["app"]
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${FRONT_PORT:-3000}:80"
+    networks:
+      - fraud-net
+
 volumes:
   kafka-data:
   postgres-data:

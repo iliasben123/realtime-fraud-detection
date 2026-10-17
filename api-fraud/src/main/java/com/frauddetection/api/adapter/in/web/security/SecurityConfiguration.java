@@ -48,7 +48,7 @@ public class SecurityConfiguration {
 
     static final String ROLES_CLAIM = "roles";
     static final String[] PUBLIC_PATHS = {
-            "/api/v1/auth/**", "/actuator/health", "/actuator/health/**", "/actuator/info",
+            "/api/v1/auth/login", "/actuator/health", "/actuator/health/**", "/actuator/info",
             "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**", "/error",
     };
 

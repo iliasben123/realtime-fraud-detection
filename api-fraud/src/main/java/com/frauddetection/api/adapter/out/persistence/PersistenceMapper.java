@@ -12,12 +12,15 @@ import com.frauddetection.api.domain.model.Transaction;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Order;
 import jakarta.persistence.criteria.Root;
 import org.hibernate.query.criteria.HibernateCriteriaBuilder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Function;
 
 /** Conversions entités JPA <-> modèle du domaine, et pagination Spring Data <-> domaine. */
@@ -66,15 +69,20 @@ final class PersistenceMapper {
      * en tête d'un tri décroissant (comportement PostgreSQL par défaut). Spring Data ne propage pas la
      * précédence des NULL vers les Criteria Queries, on passe par l'API Hibernate. Ignoré pour le count.
      */
-    static void applyOrder(CriteriaQuery<?> query, CriteriaBuilder cb, Root<?> root, PageQuery q) {
+    static void applyOrder(CriteriaQuery<?> query, CriteriaBuilder cb, Root<?> root, PageQuery q, String tieBreaker) {
         if (query == null || Long.class.equals(query.getResultType()) || q == null) {
             return;
         }
         HibernateCriteriaBuilder hcb = (HibernateCriteriaBuilder) cb;
+        boolean asc = q.direction() == PageQuery.SortDirection.ASC;
         Expression<?> column = root.get(q.sortBy());
-        query.orderBy(q.direction() == PageQuery.SortDirection.ASC
-                ? hcb.asc(column, false)
-                : hcb.desc(column, false));
+        List<Order> orders = new ArrayList<>();
+        orders.add(asc ? hcb.asc(column, false) : hcb.desc(column, false));
+        // Second critère (date) : ordre total, donc pagination stable entre deux requêtes
+        if (tieBreaker != null && !tieBreaker.equals(q.sortBy())) {
+            orders.add(hcb.desc(root.get(tieBreaker), false));
+        }
+        query.orderBy(orders);
     }
 
     static <E, D> PageResult<D> toPageResult(Page<E> page, Function<E, D> mapper) {

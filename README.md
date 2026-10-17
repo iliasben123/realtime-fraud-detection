@@ -19,7 +19,10 @@ bancaires en streaming, à partir du dataset [PaySim](https://www.kaggle.com/dat
                                                                                       │
                                                                                       ▼
                                                                     API REST Java Spring Boot
-                                                                 (architecture hexagonale)
+                                                                 (architecture hexagonale, JWT)
+                                                                                      │
+                                                                                      ▼
+                                                                    Console analyste React / TypeScript
 ```
 
 | Brique | Techno | Dossier | Statut |
@@ -28,7 +31,8 @@ bancaires en streaming, à partir du dataset [PaySim](https://www.kaggle.com/dat
 | Ingestion | Python 3.12, confluent-kafka | `ingestion/` | fait |
 | Traitement | PySpark 3.5 Structured Streaming, psycopg2 | `processing/spark_jobs/` | fait |
 | Machine learning | Spark MLlib (GBTClassifier), registre de modèles versionné | `processing/spark_jobs/ml/` | fait |
-| API métier | Java 21, Spring Boot 3.5, JPA, springdoc, ArchUnit | `api-fraud/` | fait |
+| API métier | Java 21, Spring Boot 3.5, JPA, Spring Security JWT, springdoc, ArchUnit | `api-fraud/` | fait |
+| Console analyste | React 18, TypeScript, Vite, TanStack Query, client OpenAPI généré | `frontend/` | fait |
 
 > Kafka tourne en mode KRaft (sans Zookeeper), supporté depuis Kafka 3.3 et seul mode possible en 4.x.
 
@@ -96,10 +100,11 @@ docker compose --profile app up -d --build
 docker compose logs -f spark          # suivi des micro-batches
 ```
 
-Lance en plus de l'infra : le producer (lit `./data/raw/paysim.csv`), le job Spark et l'API.
+Lance en plus de l'infra : le producer (lit `./data/raw/paysim.csv`), le job Spark, l'API et la console.
 
 | Service | URL |
 |---|---|
+| Console analyste | http://localhost:3000 (port hôte : `FRONT_PORT`) |
 | Spark UI | http://localhost:4040 |
 | API REST | http://localhost:8080/api/v1 (port hôte : `API_PORT` dans `.env`) |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
@@ -273,7 +278,8 @@ Les règles de dépendance sont vérifiées par un test ArchUnit (`HexagonalArch
 | Méthode | Route | Description |
 |---|---|---|
 | POST | `/api/v1/auth/login` | obtention d'un jeton JWT (`{"username","password"}`), route publique |
-| GET | `/api/v1/alerts` | recherche paginée : `status`, `severity`, `ruleName`, `account`, `minAmount`, `minRiskScore`, `from`, `to`, `page`, `size`, `sortBy`, `direction` |
+| GET | `/api/v1/auth/me` | utilisateur courant, rôles, droit de bloquer (restauration de session côté client) |
+| GET | `/api/v1/alerts` | recherche paginée : `status`, `severity`, `ruleName`, `account`, `minAmount`, `minRiskScore`, `from`, `to`, `page`, `size`, `sortBy` (défaut `riskScore`, puis date), `direction` |
 | GET | `/api/v1/alerts/{id}` | alerte + transaction associée |
 | GET | `/api/v1/alerts/{id}/history` | historique des changements de statut |
 | PATCH | `/api/v1/alerts/{id}/status` | changer le statut : `{"status":"CONFIRMED_FRAUD","comment":"..."}` ; relecteur = utilisateur authentifié ; `BLOCKED` réservé au rôle SUPERVISOR |
@@ -354,7 +360,36 @@ Le workflow GitHub Actions (`.github/workflows/ci.yml`) exécute à chaque push 
 | `api` | `mvn verify` : tests unitaires + Testcontainers, rapports publiés en artefact |
 | `spark` | build de l'image Spark (cache GHA) puis pytest des règles dans l'image |
 | `producer` | pytest du producer (conversion CSV, lecture en flux, générateur) |
+| `frontend` | typecheck TypeScript, ESLint, build Vite |
 | `compose` | validation du `docker-compose.yml` avec tous les profils |
+
+## Console analyste : React + TypeScript
+
+`frontend/` est l'outil de travail des analystes, pas une vitrine : il ferme la boucle construite côté
+backend (alertes → décision → suivi de la qualité).
+
+| Écran | Contenu |
+|---|---|
+| Connexion | JWT, restauration de session via `GET /auth/me`, interface adaptée au rôle |
+| File d'alertes | triée par score de risque puis date, filtres statut / sévérité / règle / compte / score, pagination |
+| Fiche alerte | transaction, score ML et version de modèle, autres règles déclenchées, historique des décisions, actions de statut ; le bouton **Bloquer** n'est actif que pour un superviseur et les 403 / 409 du backend sont affichés tels quels |
+| Transactions | recherche sur suspectes / label / type / compte / montant |
+| Qualité de détection | indicateurs globaux, par règle (volume, précision label, décisions analystes, taux de revue) avec graphique, par version de modèle MLlib |
+
+Stack : Vite, React 18, TypeScript strict, TanStack Query, react-router, Tailwind, Recharts, et un client
+HTTP **typé généré depuis le contrat OpenAPI de l'API** (`openapi-typescript` + `openapi-fetch`) : aucun type
+écrit à la main, une divergence entre le front et l'API casse le typecheck.
+
+```bash
+cd frontend
+npm install
+npm run generate:api        # régénère src/api/schema.d.ts depuis http://localhost:8080/v3/api-docs (API_DOCS_URL pour changer)
+npm run dev                 # http://localhost:5173, /api proxifié vers l'API (VITE_API_PROXY, défaut http://localhost:8080)
+npm run typecheck && npm run lint && npm run build
+```
+
+En Docker (profil `app`), le front est servi par nginx sur `http://localhost:3000` (`FRONT_PORT`) et
+proxifie `/api` vers le conteneur `api` : même origine, pas de CORS.
 
 ## Modèle de données PostgreSQL (schéma `fraud`)
 

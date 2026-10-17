@@ -57,7 +57,7 @@ class AlertController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "riskScore") @Parameter(description = "Défaut : score de risque décroissant (file de travail), puis date") String sortBy,
             @RequestParam(defaultValue = "DESC") String direction) {
 
         AlertFilter filter = new AlertFilter(status, severity, ruleName, account, minAmount, minRiskScore, from, to);

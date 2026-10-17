@@ -30,6 +30,7 @@ done
 # Lecture ciblée (certaines valeurs du .env contiennent des espaces, ex. "5 minutes")
 env_value() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- | tr -d '\r' | xargs; }
 API_PORT="$(env_value API_PORT)"; API_PORT="${API_PORT:-8080}"
+FRONT_PORT="$(env_value FRONT_PORT)"; FRONT_PORT="${FRONT_PORT:-3000}"
 API="http://localhost:${API_PORT}"
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
@@ -53,7 +54,7 @@ else
 fi
 
 step "Infrastructure + Spark + API"
-docker compose --profile app up -d $BUILD kafka kafka-init kafka-ui postgres spark api
+docker compose --profile app up -d $BUILD kafka kafka-init kafka-ui postgres spark api frontend
 
 step "Attente de l'API (${API})"
 for i in $(seq 1 60); do
@@ -92,6 +93,7 @@ curl -fsS "${API}/api/v1/alerts?status=OPEN&severity=CRITICAL&size=1" \
 cat <<EOF
 
 Plateforme prête :
+  Console    : http://localhost:${FRONT_PORT}  (analyst / analyst123, supervisor / supervisor123)
   Swagger UI : ${API}/swagger-ui.html
   Kafka UI   : http://localhost:8085
   Spark UI   : http://localhost:4040
